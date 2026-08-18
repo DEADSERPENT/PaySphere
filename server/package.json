@@ -1,0 +1,36 @@
+{
+  "name": "paysphere",
+  "version": "1.0.0",
+  "description": "PaySphere - Distributed Payment Orchestration System backend",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "migrate": "node src/config/migrate.js up",
+    "migrate:down": "node src/config/migrate.js down",
+    "worker": "node src/workers/paymentWorker.js",
+    "loadtest": "node scripts/loadTest.js",
+    "test": "jest --runInBand",
+    "test:unit": "jest --runInBand tests/unit",
+    "test:integration": "jest --runInBand tests/integration",
+    "test:failure": "jest --runInBand tests/failure-injection",
+    "test:watch": "jest --watch"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0",
+    "pg": "^8.12.0",
+    "pino": "^9.3.2",
+    "pino-http": "^10.2.0",
+    "razorpay": "^2.9.4"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

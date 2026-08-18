@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: paysphere-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: paysphere
+      POSTGRES_PASSWORD: paysphere
+      POSTGRES_DB: paysphere
+    ports:
+      - "5433:5432"
+    volumes:
+      - paysphere_pgdata:/var/lib/postgresql/data
+      - ./migrations/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paysphere"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  paysphere_pgdata:
