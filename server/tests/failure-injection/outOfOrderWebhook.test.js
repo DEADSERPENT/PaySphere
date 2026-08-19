@@ -59,4 +59,35 @@ describe('failure injection: out-of-order webhook delivery', () => {
     expect(getRes.body.status).toBe('COMPLETED');
     expect(getRes.body.transactions).toHaveLength(1);
   });
+
+  test('a captured event arriving after an earlier failed-attempt event still completes the payment', async () => {
+    const created = await request(app)
+      .post('/api/v1/payments')
+      .set('Idempotency-Key', 'ooo-key-2')
+      .send({ orderId: 'ORDER-OOO-2', amount: 20000, currency: 'INR' });
+
+    // Same scenario as above, but delivered in the order Razorpay would
+    // actually send it: attempt 1's failure notification lands first,
+    // attempt 2 (the customer's retry with a different method) captures
+    // and is delivered second. The intent must not get stuck FAILED.
+    const failedPayment = mockGateway.simulatePaymentFailed(created.body.gatewayOrderId, { id: 'pay_attempt_1' });
+    const capturedPayment = mockGateway.simulatePaymentCaptured(created.body.gatewayOrderId, { id: 'pay_attempt_2' });
+
+    const failedEvent = mockGateway.buildWebhookEventPayload('payment.failed', failedPayment, 'evt_ooo_failed_2');
+    const capturedEvent = mockGateway.buildWebhookEventPayload('payment.captured', capturedPayment, 'evt_ooo_captured_2');
+
+    const failedRes = await sendWebhook(app, failedEvent);
+    expect(failedRes.status).toBe(200);
+
+    let getRes = await request(app).get(`/api/v1/payments/${created.body.paymentId}`);
+    expect(getRes.body.status).toBe('FAILED');
+
+    const capturedRes = await sendWebhook(app, capturedEvent);
+    expect(capturedRes.status).toBe(200);
+    expect(capturedRes.body.status).toBe('PROCESSED');
+
+    getRes = await request(app).get(`/api/v1/payments/${created.body.paymentId}`);
+    expect(getRes.body.status).toBe('COMPLETED');
+    expect(getRes.body.transactions).toHaveLength(1);
+  });
 });

@@ -17,18 +17,43 @@ PROCESSING       CANCELLED          EXPIRED           (SUCCEEDED / FAILED,
    |        |        |
    v        v        v
 SUCCEEDED FAILED  EXPIRED
-   |
-   v
-COMPLETED
+   |        |
+   v        v
+COMPLETED SUCCEEDED (see "Why FAILED can still become SUCCEEDED" below)
 ```
 
-`CANCELLED`, `FAILED`, `EXPIRED`, `COMPLETED` are **terminal**: once reached,
+`CANCELLED`, `EXPIRED`, `COMPLETED` are **terminal**: once reached,
 `domain/paymentTransitions.js` has no outgoing edge for them, and
 `assertValidTransition` throws `InvalidTransitionError` for any attempt to
 leave one. This is what "a payment cannot transition from a terminal state
 to another incompatible terminal state" (spec section 7) actually means in
 code — it isn't a runtime check bolted on, it's structurally impossible to
 express.
+
+`FAILED` is a deliberate exception to that, with exactly one outgoing edge:
+`FAILED -> SUCCEEDED`. See below.
+
+## Why FAILED can still become SUCCEEDED
+
+Razorpay's Standard Checkout lets a customer retry with a different payment
+method after a decline, without PaySphere ever seeing a new order — the
+retry reuses the same `gatewayOrderId`, so a `payment.failed` webhook for
+one attempt and a `payment.captured` webhook for a later attempt can both
+arrive for the *same* payment intent, in either order.
+
+`reconciliationService.pickAuthoritativeOutcome` already encodes the correct
+priority for this — a capture always outranks a failure when reconciling a
+stuck payment against gateway-side truth — but that only covers intents
+reconciliation still considers stuck (`PENDING`/`PROCESSING`). Before this
+edge existed, a `payment.failed` arriving *before* the retry's
+`payment.captured` would move the intent straight to a fully terminal
+`FAILED`, and the later, authoritative capture would be silently dropped as
+"already terminal" — even though `outOfOrderWebhook.test.js` already proved
+the reverse ordering (captured-then-failed) resolves correctly. The
+`FAILED -> SUCCEEDED` edge makes both orderings converge on the same
+correct outcome: capture wins, regardless of delivery order. A second,
+genuinely final failure (no capture ever arrives) is still resolved the
+same way it always was — reconciliation's stuck-payment sweep.
 
 ## Why PENDING can jump straight to SUCCEEDED/FAILED
 

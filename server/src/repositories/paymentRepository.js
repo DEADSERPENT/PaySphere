@@ -55,15 +55,26 @@ async function findStuckIntents(executor, { statuses, olderThan }) {
   return rows;
 }
 
+/**
+ * createPayment wraps this in retryWithBackoff to survive transient DB
+ * blips after the gateway order already exists upstream. If a write
+ * actually succeeds but its acknowledgment is lost (rare, but possible),
+ * a retry must not crash on the (gateway, gateway_order_id) unique
+ * constraint -- ON CONFLICT DO NOTHING plus a fallback lookup makes the
+ * insert idempotent, matching the same pattern insertTransactionIfAbsent
+ * already uses for the equivalent problem on `transactions`.
+ */
 async function insertOrder(executor, order) {
   const { id, paymentIntentId, gateway, gatewayOrderId, status } = order;
   const { rows } = await withExecutor(executor).query(
     `INSERT INTO payment_orders (id, payment_intent_id, gateway, gateway_order_id, status)
      VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (gateway, gateway_order_id) DO NOTHING
      RETURNING *`,
     [id, paymentIntentId, gateway, gatewayOrderId, status]
   );
-  return rows[0];
+  if (rows[0]) return rows[0];
+  return findOrderByGatewayOrderId(executor, gateway, gatewayOrderId);
 }
 
 async function findOrderByGatewayOrderId(executor, gateway, gatewayOrderId) {
@@ -97,6 +108,50 @@ async function insertAttempt(executor, attempt) {
     `INSERT INTO payment_attempts
        (id, payment_intent_id, attempt_number, gateway, gateway_payment_id, status, failure_code, failure_reason)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING *`,
+    [
+      id,
+      paymentIntentId,
+      attemptNumber,
+      gateway,
+      gatewayPaymentId || null,
+      status,
+      failureCode || null,
+      failureReason || null,
+    ]
+  );
+  return rows[0];
+}
+
+/**
+ * Like insertAttempt, but for the authoritative gateway-outcome path
+ * (applyGatewayOutcome): Razorpay commonly sends more than one webhook for
+ * the *same* attempt as it progresses (e.g. payment.authorized then
+ * payment.captured share one gatewayPaymentId), and uq_payment_attempts_gateway_payment_id
+ * allows only one row per (gateway, gatewayPaymentId). A plain insert on the
+ * second event would violate that constraint and crash webhook processing.
+ * On conflict, update the existing row's outcome in place instead of
+ * inserting a duplicate -- attempt_number is deliberately left untouched so
+ * the row keeps identifying the same attempt throughout its lifecycle.
+ */
+async function upsertAttempt(executor, attempt) {
+  const {
+    id,
+    paymentIntentId,
+    attemptNumber,
+    gateway,
+    gatewayPaymentId,
+    status,
+    failureCode,
+    failureReason,
+  } = attempt;
+  const { rows } = await withExecutor(executor).query(
+    `INSERT INTO payment_attempts
+       (id, payment_intent_id, attempt_number, gateway, gateway_payment_id, status, failure_code, failure_reason)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (gateway, gateway_payment_id) WHERE gateway_payment_id IS NOT NULL
+     DO UPDATE SET status = EXCLUDED.status, failure_code = EXCLUDED.failure_code,
+       failure_reason = EXCLUDED.failure_reason, updated_at = now()
      RETURNING *`,
     [
       id,
@@ -198,6 +253,7 @@ module.exports = {
   findOrderByGatewayOrderId,
   findOrdersByIntentId,
   insertAttempt,
+  upsertAttempt,
   nextAttemptNumber,
   findAttemptByGatewayPaymentId,
   findAttemptsByIntentId,

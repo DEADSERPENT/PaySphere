@@ -83,6 +83,35 @@ describe('POST /api/v1/webhooks/razorpay (webhook + PostgreSQL)', () => {
     expect(getRes.body.transactions).toHaveLength(1);
   });
 
+  test('payment.authorized followed by payment.captured for the same attempt settles the payment without crashing', async () => {
+    const created = await createPayment('wh-key-authorize-then-capture');
+    const captured = mockGateway.simulatePaymentCaptured(created.gatewayOrderId, { id: 'pay_authcap_1' });
+    const authorized = { ...captured, status: 'authorized' };
+
+    const authorizedEvent = mockGateway.buildWebhookEventPayload('payment.authorized', authorized, 'evt_authorized_1');
+    const capturedEvent = mockGateway.buildWebhookEventPayload('payment.captured', captured, 'evt_captured_1');
+
+    const authorizedRes = await sendWebhook(app, authorizedEvent);
+    expect(authorizedRes.status).toBe(200);
+    expect(authorizedRes.body.status).toBe('PROCESSED');
+
+    let getRes = await request(app).get(`/api/v1/payments/${created.paymentId}`);
+    expect(getRes.body.status).toBe('PROCESSING');
+    expect(getRes.body.attempts).toHaveLength(1);
+
+    const capturedRes = await sendWebhook(app, capturedEvent);
+    expect(capturedRes.status).toBe(200);
+    expect(capturedRes.body.status).toBe('PROCESSED');
+
+    getRes = await request(app).get(`/api/v1/payments/${created.paymentId}`);
+    expect(getRes.body.status).toBe('COMPLETED');
+    expect(getRes.body.transactions).toHaveLength(1);
+    // Same underlying gatewayPaymentId across both events -- one attempt
+    // row, updated in place, not a second row (uq_payment_attempts_gateway_payment_id).
+    expect(getRes.body.attempts).toHaveLength(1);
+    expect(getRes.body.attempts[0].status).toBe('SUCCEEDED');
+  });
+
   test('an unrecognized event type is acknowledged but does not change payment state', async () => {
     const created = await createPayment('wh-key-4');
     const event = { body: { event: 'refund.created', payload: {} }, eventId: 'evt_4' };

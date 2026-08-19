@@ -238,7 +238,7 @@ async function applyGatewayOutcome(paymentIntentId, gatewayPayment, { source, re
         'Gateway payment amount/currency mismatch; refusing to mark payment succeeded'
       );
       const attemptNumber = await paymentRepository.nextAttemptNumber(client, paymentIntentId);
-      await paymentRepository.insertAttempt(client, {
+      await paymentRepository.upsertAttempt(client, {
         id: ids.paymentAttemptId(),
         paymentIntentId,
         attemptNumber,
@@ -254,7 +254,7 @@ async function applyGatewayOutcome(paymentIntentId, gatewayPayment, { source, re
     assertValidTransition(intent.status, targetState);
 
     const attemptNumber = await paymentRepository.nextAttemptNumber(client, paymentIntentId);
-    await paymentRepository.insertAttempt(client, {
+    await paymentRepository.upsertAttempt(client, {
       id: ids.paymentAttemptId(),
       paymentIntentId,
       attemptNumber,

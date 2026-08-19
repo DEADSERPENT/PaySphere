@@ -27,7 +27,14 @@ class InvalidTransitionError extends Error {
  *    record has been created — SUCCEEDED and COMPLETED are split so
  *    "gateway confirmed" and "local bookkeeping settled" remain auditable
  *    as distinct facts.
- *  - CANCELLED, FAILED, EXPIRED, COMPLETED are terminal: no outgoing edges.
+ *  - FAILED has exactly one outgoing edge, to SUCCEEDED: Razorpay Standard
+ *    Checkout permits retrying with a different payment method against the
+ *    same order after a decline, so a `payment.failed` webhook for one
+ *    attempt must not permanently block a `payment.captured` webhook for a
+ *    later attempt on that same order from winning (this mirrors the
+ *    capture-beats-failure priority `reconciliationService.pickAuthoritativeOutcome`
+ *    already applies when repairing stuck payments).
+ *  - CANCELLED, EXPIRED, COMPLETED are terminal: no outgoing edges.
  */
 const TRANSITIONS = Object.freeze({
   [STATES.CREATED]: new Set([STATES.PENDING]),
@@ -40,7 +47,7 @@ const TRANSITIONS = Object.freeze({
   ]),
   [STATES.PROCESSING]: new Set([STATES.SUCCEEDED, STATES.FAILED, STATES.EXPIRED]),
   [STATES.SUCCEEDED]: new Set([STATES.COMPLETED]),
-  [STATES.FAILED]: new Set(),
+  [STATES.FAILED]: new Set([STATES.SUCCEEDED]),
   [STATES.CANCELLED]: new Set(),
   [STATES.EXPIRED]: new Set(),
   [STATES.COMPLETED]: new Set(),

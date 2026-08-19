@@ -13,6 +13,7 @@ describe('payment state transitions', () => {
     [STATES.PROCESSING, STATES.FAILED],
     [STATES.PROCESSING, STATES.EXPIRED],
     [STATES.SUCCEEDED, STATES.COMPLETED],
+    [STATES.FAILED, STATES.SUCCEEDED],
   ])('allows %s -> %s', (from, to) => {
     expect(canTransition(from, to)).toBe(true);
     expect(() => assertValidTransition(from, to)).not.toThrow();
@@ -23,7 +24,11 @@ describe('payment state transitions', () => {
     [STATES.PENDING, STATES.COMPLETED],
     [STATES.PROCESSING, STATES.CANCELLED],
     [STATES.SUCCEEDED, STATES.FAILED],
-    [STATES.FAILED, STATES.SUCCEEDED],
+    [STATES.FAILED, STATES.PENDING],
+    [STATES.FAILED, STATES.PROCESSING],
+    [STATES.FAILED, STATES.CANCELLED],
+    [STATES.FAILED, STATES.EXPIRED],
+    [STATES.FAILED, STATES.COMPLETED],
     [STATES.CANCELLED, STATES.PENDING],
     [STATES.EXPIRED, STATES.PROCESSING],
     [STATES.COMPLETED, STATES.PENDING],
@@ -36,7 +41,7 @@ describe('payment state transitions', () => {
     expect(canTransition(STATES.PENDING, STATES.PENDING)).toBe(false);
   });
 
-  test.each([STATES.CANCELLED, STATES.FAILED, STATES.EXPIRED, STATES.COMPLETED])(
+  test.each([STATES.CANCELLED, STATES.EXPIRED, STATES.COMPLETED])(
     'terminal state %s has no outgoing transitions',
     (terminal) => {
       for (const target of Object.values(STATES)) {
@@ -45,6 +50,12 @@ describe('payment state transitions', () => {
       }
     }
   );
+
+  test('FAILED has exactly one outgoing transition, to SUCCEEDED', () => {
+    for (const target of Object.values(STATES)) {
+      expect(canTransition(STATES.FAILED, target)).toBe(target === STATES.SUCCEEDED);
+    }
+  });
 
   test('rejects transitioning to an unknown state', () => {
     expect(() => assertValidTransition(STATES.PENDING, 'NOT_A_STATE')).toThrow(/Unknown target payment state/);
