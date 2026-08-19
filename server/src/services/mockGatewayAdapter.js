@@ -176,12 +176,23 @@ class MockGatewayAdapter {
     return payment;
   }
 
-  /** Builds a Razorpay-shaped webhook payload for a given event type + payment entity. */
+  /**
+   * Builds a Razorpay-shaped webhook body + its dedup event ID. Matches the
+   * real shape observed from live Razorpay deliveries: the body carries
+   * `event` but no unique event ID -- that's delivered separately via the
+   * `X-Razorpay-Event-Id` header, which callers must set on the request
+   * (see webhookController.js / webhookService.js).
+   */
   buildWebhookEventPayload(eventType, payment, eventId = nextId('evt')) {
     return {
-      id: eventId,
-      event: eventType,
-      payload: { payment: { entity: payment } },
+      body: {
+        entity: 'event',
+        event: eventType,
+        contains: ['payment'],
+        payload: { payment: { entity: payment } },
+        created_at: Math.floor(Date.now() / 1000),
+      },
+      eventId,
     };
   }
 

@@ -2,13 +2,14 @@ const request = require('supertest');
 const { buildTestApp, mockGateway } = require('../helpers/testApp');
 const testDb = require('../helpers/testDb');
 
-function sendWebhook(app, eventPayload) {
-  const rawBody = JSON.stringify(eventPayload);
+function sendWebhook(app, event) {
+  const rawBody = JSON.stringify(event.body);
   const signature = mockGateway.signWebhookBody(rawBody);
   return request(app)
     .post('/api/v1/webhooks/razorpay')
     .set('Content-Type', 'application/json')
     .set('x-razorpay-signature', signature)
+    .set('x-razorpay-event-id', event.eventId)
     .send(rawBody);
 }
 

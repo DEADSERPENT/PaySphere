@@ -70,7 +70,7 @@ async function processEvent(event) {
  * The signature check happens before any database write, so a forged
  * request can never mutate state (spec section 14).
  */
-async function handleRazorpayWebhook({ rawBody, signature }) {
+async function handleRazorpayWebhook({ rawBody, signature, eventId }) {
   const start = Date.now();
 
   if (!gatewayService.verifyWebhookSignature({ rawBody, signature })) {
@@ -84,8 +84,13 @@ async function handleRazorpayWebhook({ rawBody, signature }) {
   } catch {
     throw new ValidationError('Webhook payload is not valid JSON');
   }
-  if (!payload.event || !payload.id) {
-    throw new ValidationError('Webhook payload missing event/id');
+  // Razorpay's webhook body carries the event type (`event`) but, despite
+  // some other gateways' conventions, no unique event ID field -- dedup is
+  // done via the `X-Razorpay-Event-Id` header instead (Razorpay docs:
+  // "You can identify the duplicate webhooks using the x-razorpay-event-id
+  // header. The value for this header is unique per event.").
+  if (!payload.event || !eventId) {
+    throw new ValidationError('Webhook missing event type or X-Razorpay-Event-Id header');
   }
 
   metrics.webhookReceived(payload.event);
@@ -93,14 +98,14 @@ async function handleRazorpayWebhook({ rawBody, signature }) {
   const { event, created } = await webhookRepository.insertIfAbsent(null, {
     id: ids.webhookEventId(),
     gateway: gatewayService.name,
-    gatewayEventId: payload.id,
+    gatewayEventId: eventId,
     eventType: payload.event,
     payload,
   });
 
   if (!created) {
     metrics.webhookDuplicate();
-    logger.info({ gatewayEventId: payload.id }, 'Duplicate webhook event ignored');
+    logger.info({ gatewayEventId: eventId }, 'Duplicate webhook event ignored');
     return { status: 'DUPLICATE', event };
   }
 
@@ -112,7 +117,7 @@ async function handleRazorpayWebhook({ rawBody, signature }) {
   } catch (err) {
     await webhookRepository.markFailed(null, event.id, err.message);
     metrics.webhookLatency(Date.now() - start);
-    logger.error({ gatewayEventId: payload.id, err: err.message }, 'Webhook event processing failed');
+    logger.error({ gatewayEventId: eventId, err: err.message }, 'Webhook event processing failed');
     throw err;
   }
 }

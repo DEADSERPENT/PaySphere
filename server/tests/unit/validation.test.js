@@ -1,4 +1,9 @@
-const { validateCreatePayment, validateVerifyPayment, requireIdempotencyKey } = require('../../src/middleware/validation');
+const {
+  validateCreatePayment,
+  validateVerifyPayment,
+  validateReportFailure,
+  requireIdempotencyKey,
+} = require('../../src/middleware/validation');
 const { ValidationError } = require('../../src/domain/errors');
 
 function mockReq(body = {}, headers = {}) {
@@ -34,6 +39,16 @@ describe('validateCreatePayment', () => {
     ).toBeInstanceOf(ValidationError);
   });
 
+  test('rejects an amount below Razorpay\'s 100-paise minimum', () => {
+    const req = mockReq({ orderId: 'O', amount: 50, currency: 'INR' });
+    expect(runMiddleware(validateCreatePayment, req)).toBeInstanceOf(ValidationError);
+  });
+
+  test('accepts the minimum amount of exactly 100', () => {
+    const req = mockReq({ orderId: 'O', amount: 100, currency: 'INR' });
+    expect(runMiddleware(validateCreatePayment, req)).toBeUndefined();
+  });
+
   test('rejects non-integer amount', () => {
     const req = mockReq({ orderId: 'O', amount: 100.5, currency: 'INR' });
     expect(runMiddleware(validateCreatePayment, req)).toBeInstanceOf(ValidationError);
@@ -60,6 +75,22 @@ describe('validateVerifyPayment', () => {
     const body = { gatewayOrderId: 'order_1', gatewayPaymentId: 'pay_1', signature: 'sig' };
     delete body[field];
     expect(runMiddleware(validateVerifyPayment, mockReq(body))).toBeInstanceOf(ValidationError);
+  });
+});
+
+describe('validateReportFailure', () => {
+  test('accepts an empty body (all fields optional)', () => {
+    expect(runMiddleware(validateReportFailure, mockReq({}))).toBeUndefined();
+  });
+
+  test('accepts a full payload', () => {
+    const req = mockReq({ code: 'BAD_REQUEST_ERROR', description: 'Card declined', gatewayPaymentId: 'pay_1' });
+    expect(runMiddleware(validateReportFailure, req)).toBeUndefined();
+  });
+
+  test.each(['code', 'description', 'gatewayPaymentId'])('rejects a non-string %s', (field) => {
+    const req = mockReq({ [field]: 12345 });
+    expect(runMiddleware(validateReportFailure, req)).toBeInstanceOf(ValidationError);
   });
 });
 

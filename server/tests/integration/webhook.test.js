@@ -2,13 +2,14 @@ const request = require('supertest');
 const { buildTestApp, mockGateway } = require('../helpers/testApp');
 const testDb = require('../helpers/testDb');
 
-function sendWebhook(app, eventPayload) {
-  const rawBody = JSON.stringify(eventPayload);
-  const signature = mockGateway.signWebhookBody(rawBody);
+function sendWebhook(app, event, { signature } = {}) {
+  const rawBody = JSON.stringify(event.body);
+  const sig = signature !== undefined ? signature : mockGateway.signWebhookBody(rawBody);
   return request(app)
     .post('/api/v1/webhooks/razorpay')
     .set('Content-Type', 'application/json')
-    .set('x-razorpay-signature', signature)
+    .set('x-razorpay-signature', sig)
+    .set('x-razorpay-event-id', event.eventId)
     .send(rawBody);
 }
 
@@ -56,13 +57,8 @@ describe('POST /api/v1/webhooks/razorpay (webhook + PostgreSQL)', () => {
     const created = await createPayment('wh-key-2');
     const payment = mockGateway.simulatePaymentCaptured(created.gatewayOrderId);
     const event = mockGateway.buildWebhookEventPayload('payment.captured', payment, 'evt_2');
-    const rawBody = JSON.stringify(event);
 
-    const res = await request(app)
-      .post('/api/v1/webhooks/razorpay')
-      .set('Content-Type', 'application/json')
-      .set('x-razorpay-signature', 'forged-signature')
-      .send(rawBody);
+    const res = await sendWebhook(app, event, { signature: 'forged-signature' });
 
     expect(res.status).toBe(401);
 
@@ -89,7 +85,7 @@ describe('POST /api/v1/webhooks/razorpay (webhook + PostgreSQL)', () => {
 
   test('an unrecognized event type is acknowledged but does not change payment state', async () => {
     const created = await createPayment('wh-key-4');
-    const event = { id: 'evt_4', event: 'refund.created', payload: {} };
+    const event = { body: { event: 'refund.created', payload: {} }, eventId: 'evt_4' };
 
     const res = await sendWebhook(app, event);
 
@@ -102,13 +98,21 @@ describe('POST /api/v1/webhooks/razorpay (webhook + PostgreSQL)', () => {
 
   test('a webhook for an unknown gateway order is acknowledged and ignored', async () => {
     const event = {
-      id: 'evt_5',
-      event: 'payment.captured',
-      payload: {
-        payment: {
-          entity: { id: 'pay_orphan', order_id: 'order_mock_unknown', amount: 1000, currency: 'INR', status: 'captured' },
+      body: {
+        event: 'payment.captured',
+        payload: {
+          payment: {
+            entity: {
+              id: 'pay_orphan',
+              order_id: 'order_mock_unknown',
+              amount: 1000,
+              currency: 'INR',
+              status: 'captured',
+            },
+          },
         },
       },
+      eventId: 'evt_5',
     };
 
     const res = await sendWebhook(app, event);

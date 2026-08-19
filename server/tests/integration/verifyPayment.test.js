@@ -87,8 +87,9 @@ describe('POST /api/v1/payments/:id/verify', () => {
     });
 
     // Signature "checks out" cryptographically for the forged pair, but the
-    // authoritative gateway fetch for pay_forged fails -- state must not change.
-    expect(res.status).toBe(500);
+    // authoritative gateway fetch for pay_forged fails (404 at the gateway)
+    // -- state must not change.
+    expect(res.status).toBe(404);
     const getRes = await request(app).get(`/api/v1/payments/${created.paymentId}`);
     expect(getRes.body.status).toBe('PENDING');
   });

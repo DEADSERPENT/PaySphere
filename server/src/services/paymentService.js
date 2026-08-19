@@ -127,13 +127,57 @@ async function getPayment(paymentIntentId) {
   const intent = await paymentRepository.findIntentById(null, paymentIntentId);
   if (!intent) throw new NotFoundError(`Payment not found: ${paymentIntentId}`);
 
-  const [orders, transactions, history] = await Promise.all([
+  const [orders, attempts, transactions, history] = await Promise.all([
     paymentRepository.findOrdersByIntentId(null, paymentIntentId),
+    paymentRepository.findAttemptsByIntentId(null, paymentIntentId),
     paymentRepository.findTransactionsByIntentId(null, paymentIntentId),
     paymentRepository.findStateHistory(null, paymentIntentId),
   ]);
 
-  return { intent, orders, transactions, history };
+  return { intent, orders, attempts, transactions, history };
+}
+
+/**
+ * Records a client-reported payment failure (e.g. Razorpay checkout's
+ * `payment.failed` event) as an audit-only attempt row. Deliberately never
+ * changes the payment's state — client-side signals are not authoritative
+ * (spec section 7, invariant: "client-side success is not authoritative").
+ * This exists purely so a failed attempt is visible immediately instead of
+ * only after the next reconciliation sweep discovers it from gateway state.
+ */
+async function reportClientFailure(paymentIntentId, { gatewayPaymentId, code, description }) {
+  try {
+    return await db.withTransaction(async (client) => {
+      const intent = await paymentRepository.lockIntentById(client, paymentIntentId);
+      if (!intent) throw new NotFoundError(`Payment not found: ${paymentIntentId}`);
+
+      const attemptNumber = await paymentRepository.nextAttemptNumber(client, paymentIntentId);
+      const attempt = await paymentRepository.insertAttempt(client, {
+        id: ids.paymentAttemptId(),
+        paymentIntentId,
+        attemptNumber,
+        gateway: gatewayService.name,
+        gatewayPaymentId: gatewayPaymentId || null,
+        status: 'CLIENT_REPORTED_FAILURE',
+        failureCode: code || null,
+        failureReason: description || null,
+      });
+
+      metrics.clientReportedFailure();
+      logger.warn(
+        { paymentIntentId, gatewayPaymentId, code, description },
+        'Client reported a failed payment attempt'
+      );
+      return attempt;
+    });
+  } catch (err) {
+    if (err.code === '23505' && gatewayPaymentId) {
+      // Same gatewayPaymentId reported twice (e.g. a duplicate client-side
+      // event) -- harmless, return the attempt already recorded for it.
+      return paymentRepository.findAttemptByGatewayPaymentId(null, gatewayService.name, gatewayPaymentId);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -325,4 +369,11 @@ async function expireStalePayment(paymentIntentId, reason) {
   });
 }
 
-module.exports = { createPayment, getPayment, verifyPayment, applyGatewayOutcome, expireStalePayment };
+module.exports = {
+  createPayment,
+  getPayment,
+  verifyPayment,
+  applyGatewayOutcome,
+  expireStalePayment,
+  reportClientFailure,
+};

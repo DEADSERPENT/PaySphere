@@ -19,6 +19,29 @@ function safeCompare(a, b) {
 }
 
 /**
+ * The `razorpay` SDK rejects with a plain `{ statusCode, error: { code,
+ * description } }` object, not an Error instance -- so `.message` is
+ * `undefined` everywhere downstream (logs, retry classification, API error
+ * responses all go silent). Wrapping every SDK call through this normalizes
+ * that into a real Error with the actual Razorpay-provided description, so
+ * "gateway isolation" (spec section 8.3) also covers not leaking the SDK's
+ * error shape past this file.
+ */
+async function callRazorpay(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    const description = (err && err.error && (err.error.description || err.error.code)) || 'Razorpay API error';
+    const normalized = new Error(description);
+    normalized.statusCode = err && err.statusCode;
+    normalized.code = err && err.error && err.error.code;
+    normalized.cause = err;
+    throw normalized;
+  }
+}
+
+/**
  * Razorpay-specific implementation of the gateway adapter interface (spec
  * section 8.3). All Razorpay SDK/API knowledge is contained in this file;
  * nothing outside it should import the `razorpay` package directly.
@@ -31,12 +54,7 @@ class RazorpayAdapter {
   }
 
   async createOrder({ amount, currency, receipt, notes }) {
-    const order = await this.client.orders.create({
-      amount,
-      currency,
-      receipt,
-      notes,
-    });
+    const order = await callRazorpay(() => this.client.orders.create({ amount, currency, receipt, notes }));
     return {
       gatewayOrderId: order.id,
       status: order.status,
@@ -45,7 +63,7 @@ class RazorpayAdapter {
   }
 
   async fetchOrder(gatewayOrderId) {
-    const order = await this.client.orders.fetch(gatewayOrderId);
+    const order = await callRazorpay(() => this.client.orders.fetch(gatewayOrderId));
     return {
       gatewayOrderId: order.id,
       status: order.status,
@@ -56,7 +74,7 @@ class RazorpayAdapter {
 
   /** Lists every payment attempt Razorpay has recorded against an order — the reconciliation service's view into gateway-side truth. */
   async fetchPaymentsForOrder(gatewayOrderId) {
-    const { items } = await this.client.orders.fetchPayments(gatewayOrderId);
+    const { items } = await callRazorpay(() => this.client.orders.fetchPayments(gatewayOrderId));
     return items.map((payment) => ({
       gatewayPaymentId: payment.id,
       gatewayOrderId: payment.order_id,
@@ -70,7 +88,7 @@ class RazorpayAdapter {
   }
 
   async fetchPayment(gatewayPaymentId) {
-    const payment = await this.client.payments.fetch(gatewayPaymentId);
+    const payment = await callRazorpay(() => this.client.payments.fetch(gatewayPaymentId));
     return {
       gatewayPaymentId: payment.id,
       gatewayOrderId: payment.order_id,

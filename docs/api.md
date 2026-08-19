@@ -67,6 +67,9 @@ retry with the same key is safe — see `docs/failure-modes.md`).
   "updatedAt": "...",
   "gateway": "razorpay",
   "orders": [{ "gatewayOrderId": "order_...", "status": "paid" }],
+  "attempts": [
+    { "attemptNumber": 1, "gatewayPaymentId": "pay_...", "status": "CAPTURED", "failureCode": null, "failureReason": null, "createdAt": "..." }
+  ],
   "transactions": [
     { "transactionId": "txn_...", "gatewayPaymentId": "pay_...", "amount": 149900, "currency": "INR", "status": "CAPTURED", "createdAt": "..." }
   ],
@@ -99,6 +102,22 @@ answer, not anything the caller asserted.
 `gatewayOrderId`/`gatewayPaymentId` don't belong together or don't belong to
 this payment.
 
+## `POST /api/v1/payments/:paymentId/report-failure`
+
+Records a client-reported failure (e.g. Razorpay checkout's `payment.failed`
+event) as an **audit-only** entry — it never changes the payment's state.
+Client-side signals are never authoritative (spec section 7); this exists so
+a failed attempt is visible immediately via `GET /payments/:id` instead of
+only after the next reconciliation sweep discovers it from gateway state.
+
+```json
+{ "code": "BAD_REQUEST_ERROR", "description": "Card declined", "gatewayPaymentId": "pay_..." }
+```
+
+All fields optional — send whatever the gateway's client-side error object
+happened to include. **202 Accepted** `{ "status": "RECORDED" }`. Reporting
+the same `gatewayPaymentId` twice is harmless (no duplicate row).
+
 ## `POST /api/v1/webhooks/razorpay`
 
 Configure this URL in the Razorpay dashboard. Requires the raw request body
@@ -123,10 +142,24 @@ Handled event types: `payment.authorized`, `payment.captured`,
 `payment.failed`. Anything else is acknowledged and persisted but marked
 `IGNORED` — it does not affect payment state.
 
+## `GET /api/v1/config`
+
+Public, non-secret checkout configuration for the frontend:
+
+```json
+{ "razorpayKeyId": "rzp_test_...", "gateway": "razorpay" }
+```
+
+Returns `RAZORPAY_KEY_ID` (designed to be public — it's what
+`checkout.js` requires client-side) and which gateway adapter is currently
+active (`mock` or `razorpay`). `RAZORPAY_KEY_SECRET` is never returned here
+or anywhere else in the API surface.
+
 ## Operational endpoints
 
 - `GET /health` — liveness check, no auth, no DB dependency.
 - `GET /metrics` — Prometheus text-format counters/histograms (spec section 19).
+- `GET /` and static assets — the Standard Checkout demo page (`server/public/`).
 
 ## Errors
 

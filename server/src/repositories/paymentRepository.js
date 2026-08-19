@@ -128,6 +128,14 @@ async function findAttemptByGatewayPaymentId(executor, gateway, gatewayPaymentId
   return rows[0] || null;
 }
 
+async function findAttemptsByIntentId(executor, paymentIntentId) {
+  const { rows } = await withExecutor(executor).query(
+    'SELECT * FROM payment_attempts WHERE payment_intent_id = $1 ORDER BY attempt_number ASC',
+    [paymentIntentId]
+  );
+  return rows;
+}
+
 /**
  * Creates the local financial transaction record. Relies on the unique
  * index on gateway_payment_id (migration 001) to guarantee the same
@@ -192,6 +200,7 @@ module.exports = {
   insertAttempt,
   nextAttemptNumber,
   findAttemptByGatewayPaymentId,
+  findAttemptsByIntentId,
   insertTransactionIfAbsent,
   findTransactionsByIntentId,
   insertStateHistory,

@@ -53,7 +53,7 @@ describe('failure injection: gateway timeout during order creation', () => {
     expect(retryRes.status).toBe(201);
   });
 
-  test('a permanent (4xx) gateway rejection is not retried and fails fast', async () => {
+  test('a permanent (4xx) gateway rejection is not retried and surfaces the original status', async () => {
     const badRequestErr = Object.assign(new Error('invalid request'), { statusCode: 400 });
     mockGateway.setCreateOrderFailure(badRequestErr, Infinity);
 
@@ -62,6 +62,19 @@ describe('failure injection: gateway timeout during order creation', () => {
       .set('Idempotency-Key', 'timeout-key-3')
       .send({ orderId: 'ORDER-TIMEOUT-3', amount: 10000, currency: 'INR' });
 
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(res.status).toBe(400);
+  });
+
+  test('a gateway auth failure (invalid/revoked API keys) surfaces as 401, not a generic 500', async () => {
+    const authErr = Object.assign(new Error('Authentication failed'), { statusCode: 401 });
+    mockGateway.setCreateOrderFailure(authErr, Infinity);
+
+    const res = await request(app)
+      .post('/api/v1/payments')
+      .set('Idempotency-Key', 'timeout-key-4')
+      .send({ orderId: 'ORDER-TIMEOUT-4', amount: 10000, currency: 'INR' });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('GATEWAY_AUTH_FAILED');
   });
 });

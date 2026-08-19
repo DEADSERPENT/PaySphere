@@ -17,7 +17,10 @@ const env = {
       : process.env.DATABASE_URL,
   databasePoolMax: int(process.env.DATABASE_POOL_MAX, 10),
 
-  gatewayAdapter: process.env.GATEWAY_ADAPTER || 'mock',
+  // Forced to 'mock' under the test runner regardless of .env, so the test
+  // suite can never accidentally hit a real Razorpay account no matter what
+  // GATEWAY_ADAPTER is set to for local development.
+  gatewayAdapter: process.env.NODE_ENV === 'test' ? 'mock' : process.env.GATEWAY_ADAPTER || 'mock',
   razorpay: {
     keyId: process.env.RAZORPAY_KEY_ID,
     keySecret: process.env.RAZORPAY_KEY_SECRET,

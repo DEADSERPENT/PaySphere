@@ -12,6 +12,11 @@ class PermanentError extends Error {
     this.name = 'PermanentError';
     this.cause = cause;
     this.retryable = false;
+    // Preserve the upstream HTTP status (e.g. 401 from an auth failure, 400
+    // from a rejected request) so the error handler can surface it as-is
+    // instead of collapsing every permanent gateway failure into a generic 500.
+    this.statusCode = cause && (cause.statusCode || cause.status || (cause.response && cause.response.status));
+    this.code = this.statusCode === 401 || this.statusCode === 403 ? 'GATEWAY_AUTH_FAILED' : 'GATEWAY_REQUEST_REJECTED';
   }
 }
 
@@ -70,7 +75,6 @@ async function retryWithBackoff(fn, options = {}) {
     } catch (rawErr) {
       const err = classify(rawErr);
       lastError = err;
-      metrics.retryAttempt(operation);
 
       if (!err.retryable) {
         logger.warn({ operation, attempt, err: err.message }, 'Permanent error, not retrying');
@@ -81,6 +85,11 @@ async function retryWithBackoff(fn, options = {}) {
         logger.warn({ operation, attempt, err: err.message }, 'Retry attempts exhausted');
         throw err;
       }
+
+      // Only counts as a "retry" once we've actually decided to make another
+      // attempt -- a single permanent failure, or the final exhausted
+      // attempt, was never retried and shouldn't inflate this counter.
+      metrics.retryAttempt(operation);
 
       const backoff = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
       const jitter = Math.random() * backoff * 0.2;

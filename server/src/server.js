@@ -1,3 +1,4 @@
+const path = require('node:path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const env = require('./config/env');
@@ -18,6 +19,10 @@ function createApp() {
   }
   app.use(securityHeaders);
   app.use(securityHeaders.enforceHttps(env));
+
+  // Static Razorpay Standard Checkout demo (public/index.html + checkout.js).
+  // Talks to the real payment API below -- there is no separate demo backend.
+  app.use(express.static(path.join(__dirname, '../public')));
 
   // Captures the exact bytes received so webhook signature verification
   // (HMAC over the raw body) never operates on a re-serialized JSON string
@@ -53,6 +58,13 @@ function createApp() {
 
   app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
   app.get('/metrics', (req, res) => res.status(200).type('text/plain').send(metrics.render()));
+
+  // Public, non-secret checkout configuration for the frontend. The Razorpay
+  // Key ID is designed to be exposed client-side (it's what checkout.js
+  // requires); RAZORPAY_KEY_SECRET is never sent here or anywhere else.
+  app.get('/api/v1/config', (req, res) => {
+    res.status(200).json({ razorpayKeyId: env.razorpay.keyId, gateway: env.gatewayAdapter });
+  });
 
   app.use('/api/v1/payments', paymentLimiter, paymentRoutes);
   app.use('/api/v1/webhooks', webhookLimiter, webhookRoutes);

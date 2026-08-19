@@ -8,6 +8,7 @@ const SUPPORTED_CURRENCIES = new Set(['INR', 'USD']);
 // bound against fat-fingered or malicious multi-order-of-magnitude amounts
 // (spec section 18: validate and constrain all input).
 const ORDER_ID_MAX_LENGTH = 40;
+const MIN_AMOUNT = 100; // Razorpay's real order minimum is 100 paise (INR 1.00)
 const MAX_AMOUNT = 10_00_00_000; // 1,000,000.00 in the smallest currency unit
 
 function validateCreatePayment(req, res, next) {
@@ -21,6 +22,9 @@ function validateCreatePayment(req, res, next) {
   }
   if (!Number.isInteger(amount) || amount <= 0) {
     return next(new ValidationError('amount is required, must be an integer in the smallest currency unit, and must be positive'));
+  }
+  if (amount < MIN_AMOUNT) {
+    return next(new ValidationError(`amount must be at least ${MIN_AMOUNT} (Razorpay's minimum order amount)`));
   }
   if (amount > MAX_AMOUNT) {
     return next(new ValidationError(`amount exceeds the maximum allowed value of ${MAX_AMOUNT}`));
@@ -49,6 +53,24 @@ function validateVerifyPayment(req, res, next) {
   next();
 }
 
+// All fields optional and best-effort: this only records an audit trail
+// entry for a client-reported failure, so it should accept whatever shape
+// the gateway's client-side error object happens to have rather than
+// rejecting a report because a field the caller didn't have is missing.
+function validateReportFailure(req, res, next) {
+  const { code, description, gatewayPaymentId } = req.body || {};
+  if (code !== undefined && typeof code !== 'string') {
+    return next(new ValidationError('code must be a string when provided'));
+  }
+  if (description !== undefined && typeof description !== 'string') {
+    return next(new ValidationError('description must be a string when provided'));
+  }
+  if (gatewayPaymentId !== undefined && typeof gatewayPaymentId !== 'string') {
+    return next(new ValidationError('gatewayPaymentId must be a string when provided'));
+  }
+  next();
+}
+
 function requireIdempotencyKey(req, res, next) {
   const key = req.header('Idempotency-Key');
   if (!key || typeof key !== 'string' || key.trim().length === 0) {
@@ -60,4 +82,10 @@ function requireIdempotencyKey(req, res, next) {
   next();
 }
 
-module.exports = { validateCreatePayment, validateVerifyPayment, requireIdempotencyKey, SUPPORTED_CURRENCIES };
+module.exports = {
+  validateCreatePayment,
+  validateVerifyPayment,
+  validateReportFailure,
+  requireIdempotencyKey,
+  SUPPORTED_CURRENCIES,
+};

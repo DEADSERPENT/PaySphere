@@ -69,6 +69,7 @@ module.exports = {
   paymentCreated: () => incrementCounter('paysphere_payments_created_total'),
   paymentSucceeded: () => incrementCounter('paysphere_payments_succeeded_total'),
   paymentFailed: () => incrementCounter('paysphere_payments_failed_total'),
+  clientReportedFailure: () => incrementCounter('paysphere_client_reported_failures_total'),
   webhookReceived: (eventType) => incrementCounter('paysphere_webhooks_received_total', { event_type: eventType }),
   webhookDuplicate: () => incrementCounter('paysphere_webhooks_duplicate_total'),
   idempotencyConflict: () => incrementCounter('paysphere_idempotency_conflicts_total'),

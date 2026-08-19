@@ -42,11 +42,19 @@ const create = asyncHandler(async (req, res) => {
 });
 
 const get = asyncHandler(async (req, res) => {
-  const { intent, orders, transactions, history } = await paymentService.getPayment(req.params.paymentId);
+  const { intent, orders, attempts, transactions, history } = await paymentService.getPayment(req.params.paymentId);
   res.status(200).json({
     ...serializeIntent(intent),
     gateway: gatewayService.name,
     orders: orders.map((o) => ({ gatewayOrderId: o.gateway_order_id, status: o.status })),
+    attempts: attempts.map((a) => ({
+      attemptNumber: a.attempt_number,
+      gatewayPaymentId: a.gateway_payment_id,
+      status: a.status,
+      failureCode: a.failure_code,
+      failureReason: a.failure_reason,
+      createdAt: a.created_at,
+    })),
     transactions: transactions.map((t) => ({
       transactionId: t.id,
       gatewayPaymentId: t.gateway_payment_id,
@@ -75,4 +83,10 @@ const verify = asyncHandler(async (req, res) => {
   res.status(200).json(serializeIntent(intent));
 });
 
-module.exports = { create, get, verify };
+const reportFailure = asyncHandler(async (req, res) => {
+  const { code, description, gatewayPaymentId } = req.body;
+  await paymentService.reportClientFailure(req.params.paymentId, { code, description, gatewayPaymentId });
+  res.status(202).json({ status: 'RECORDED' });
+});
+
+module.exports = { create, get, verify, reportFailure };
